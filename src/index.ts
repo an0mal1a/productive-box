@@ -1,26 +1,10 @@
 import { Octokit } from '@octokit/rest';
 import { config } from 'dotenv';
 
-import generateBarChart from './generateBarChart.js';
 import githubQuery from './githubQuery.js';
-import { createCommittedDateQuery, createContributedRepoQuery, userInfoQuery } from './queries.js';
-/**
- * get environment variable
- */
+import { createCommittedDateQuery, userInfoQuery } from './queries.js';
+
 config({ path: ['.env'] });
-
-interface IRepo {
-  name: string;
-  owner: string;
-}
-
-interface RepoInfo {
-  name: string;
-  owner: {
-    login: string;
-  };
-  isFork: boolean;
-}
 
 interface Edge {
   node: {
@@ -28,122 +12,256 @@ interface Edge {
   };
 }
 
+interface Stat {
+  label: string;
+  commits: number;
+  percent: number;
+}
+
+function env(name: string): string {
+  const value = process.env[name];
+
+  if (!value) {
+    throw new Error(`Missing environment variable: ${name}`);
+  }
+
+  return value;
+}
+
+function generateSvg(stats: Stat[], total: number): string {
+  const width = 500;
+  const height = 220;
+
+  const barX = 180;
+  const barWidth = 210;
+  const rowStart = 78;
+  const rowHeight = 32;
+
+  const rows = stats
+    .map((stat, index) => {
+      const y = rowStart + index * rowHeight;
+      const filledWidth = Math.max(
+        0,
+        Math.min(barWidth, (stat.percent / 100) * barWidth),
+      );
+
+      return `
+        <text
+          x="24"
+          y="${y + 12}"
+          class="label"
+        >${stat.label}</text>
+
+        <rect
+          x="${barX}"
+          y="${y}"
+          width="${barWidth}"
+          height="12"
+          rx="6"
+          class="bar-bg"
+        />
+
+        <rect
+          x="${barX}"
+          y="${y}"
+          width="${filledWidth.toFixed(2)}"
+          height="12"
+          rx="6"
+          class="bar"
+        />
+
+        <text
+          x="470"
+          y="${y + 11}"
+          text-anchor="end"
+          class="percentage"
+        >${stat.percent.toFixed(1)}%</text>
+      `;
+    })
+    .join('\n');
+
+  return `
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="${width}"
+  height="${height}"
+  viewBox="0 0 ${width} ${height}"
+  role="img"
+  aria-labelledby="title desc"
+>
+  <title id="title">Coding activity</title>
+  <desc id="desc">
+    Distribution of commits by time of day.
+  </desc>
+
+  <style>
+    text {
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Helvetica,
+        Arial,
+        sans-serif;
+    }
+
+    .title {
+      fill: #f0f6fc;
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .subtitle {
+      fill: #8b949e;
+      font-size: 12px;
+    }
+
+    .label {
+      fill: #c9d1d9;
+      font-size: 13px;
+    }
+
+    .percentage {
+      fill: #8b949e;
+      font-size: 12px;
+    }
+
+    .bar-bg {
+      fill: #21262d;
+    }
+
+    .bar {
+      fill: #58a6ff;
+    }
+  </style>
+
+  <rect
+    x="0.5"
+    y="0.5"
+    width="${width - 1}"
+    height="${height - 1}"
+    rx="8"
+    fill="#0d1117"
+    stroke="#30363d"
+  />
+
+  <text x="24" y="32" class="title">
+    Coding activity
+  </text>
+
+  <text x="24" y="52" class="subtitle">
+    ${total} recent commits
+  </text>
+
+  ${rows}
+</svg>
+`.trim();
+}
+
 (async () => {
+  const token = env('GH_TOKEN');
+  const gistId = env('GIST_ID');
+  const targetOwner = env('TARGET_OWNER');
+  const targetRepo = env('TARGET_REPO');
+  const timezone = env('TIMEZONE');
+
   /**
-   * First, get user id
+   * Get authenticated GitHub user.
    */
-  const userResponse = await githubQuery(userInfoQuery).catch((error) =>
-    console.error(`Unable to get username and id\n${error}`),
-  );
+  const userResponse = await githubQuery(userInfoQuery);
+
+  if (userResponse?.message === 'Bad credentials') {
+    throw new Error('Invalid GitHub token. Please renew GH_TOKEN.');
+  }
+
   const { login: username, id } = userResponse?.data?.viewer ?? {};
 
+  if (!username || !id) {
+    throw new Error('Unable to get authenticated GitHub user.');
+  }
+
   /**
-   * Second, get contributed repos
+   * Query ONLY the selected repository.
    */
-  const contributedRepoQuery = createContributedRepoQuery(username);
-  const repoResponse = await githubQuery(contributedRepoQuery).catch((error) =>
-    console.error(`Unable to get the contributed repo\n${error}`),
+  const committedTimeResponse = await githubQuery(
+    createCommittedDateQuery(id, targetRepo, targetOwner),
   );
 
-  /**
-   * If the token is invalid, stop the process
-   */
-  if (repoResponse.message === 'Bad credentials') {
-    console.error('Invalid GitHub token. Please renew the GH_TOKEN');
-    return;
+  if (committedTimeResponse?.message === 'Bad credentials') {
+    throw new Error('Invalid GitHub token.');
   }
 
-  const repos: IRepo[] = repoResponse?.data?.user?.repositoriesContributedTo?.nodes
-    .filter((repoInfo: RepoInfo) => !repoInfo?.isFork)
-    .map((repoInfo: RepoInfo) => ({
-      name: repoInfo?.name,
-      owner: repoInfo?.owner?.login,
-    }));
+  const repository = committedTimeResponse?.data?.repository;
 
-  /**
-   * Third, get commit time and parse into commit-time/hour diagram
-   */
-  const committedTimeResponseMap = await Promise.all(
-    repos.map(({ name, owner }) => githubQuery(createCommittedDateQuery(id, name, owner))),
-  ).catch((error) => console.error(`Unable to get the commit info\n${error}`));
+  if (!repository) {
+    throw new Error(
+      'Repository not found or GH_TOKEN does not have access to TARGET_OWNER/TARGET_REPO.',
+    );
+  }
 
-  if (!committedTimeResponseMap) return;
+  const edges: Edge[] =
+    repository?.defaultBranchRef?.target?.history?.edges ?? [];
 
-  let morning = 0; // 6 - 12
+  let morning = 0; // 06 - 12
   let daytime = 0; // 12 - 18
   let evening = 0; // 18 - 24
-  let night = 0; // 0 - 6
+  let night = 0; // 00 - 06
 
-  committedTimeResponseMap.forEach((committedTimeResponse) => {
-    committedTimeResponse?.data?.repository?.defaultBranchRef?.target?.history?.edges.forEach((edge: Edge) => {
-      const committedDate = edge?.node?.committedDate;
-      const timeString = new Date(committedDate).toLocaleTimeString('en-US', {
-        hour12: false,
-        timeZone: process.env.TIMEZONE,
-      });
-      const hour = +timeString.split(':')[0];
+  for (const edge of edges) {
+    const committedDate = edge?.node?.committedDate;
 
-      /**
-       * voting and counting
-       */
-      if (hour >= 6 && hour < 12) morning++;
-      if (hour >= 12 && hour < 18) daytime++;
-      if (hour >= 18 && hour < 24) evening++;
-      if (hour >= 0 && hour < 6) night++;
+    if (!committedDate) {
+      continue;
+    }
+
+    const timeString = new Date(committedDate).toLocaleTimeString('en-US', {
+      hour12: false,
+      timeZone: timezone,
     });
-  });
 
-  /**
-   * Next, generate diagram
-   */
-  const sum = morning + daytime + evening + night;
-  if (!sum) return;
+    const hour = Number(timeString.split(':')[0]);
 
-  const oneDay = [
-    { label: '🌞 Morning', commits: morning },
-    { label: '🌆 Daytime', commits: daytime },
-    { label: '🌃 Evening', commits: evening },
-    { label: '🌙 Night', commits: night },
-  ];
-
-  const lines = oneDay.reduce((prev, cur) => {
-    const percent = (cur.commits / sum) * 100;
-    const line = [
-      `${cur.label}`.padEnd(10),
-      `${cur.commits.toString().padStart(5)} commits`.padEnd(14),
-      generateBarChart(percent, 21),
-      String(percent.toFixed(1)).padStart(5) + '%',
-    ];
-
-    return [...prev, line.join(' ')];
-  }, [] as string[]);
-
-  /**
-   * Finally, write into gist
-   */
-  const octokit = new Octokit({ auth: `token ${process.env.GH_TOKEN}` });
-  const gist = await octokit.gists
-    .get({
-      gist_id: `${process.env.GIST_ID}`,
-    })
-    .catch((error) => console.error(`Unable to update gist\n${error}`));
-  if (!gist) return;
-
-  if (!gist.data.files) {
-    console.error('No file found in the gist');
-    return;
+    if (hour >= 6 && hour < 12) morning++;
+    else if (hour >= 12 && hour < 18) daytime++;
+    else if (hour >= 18 && hour < 24) evening++;
+    else night++;
   }
 
-  const filename = Object.keys(gist.data.files)[0];
+  const total = morning + daytime + evening + night;
+
+  if (!total) {
+    throw new Error('No commits found for this user in the selected repository.');
+  }
+
+  const buckets = [
+    { label: 'Morning', commits: morning },
+    { label: 'Daytime', commits: daytime },
+    { label: 'Evening', commits: evening },
+    { label: 'Night', commits: night },
+  ];
+
+  const stats: Stat[] = buckets.map((item) => ({
+    ...item,
+    percent: (item.commits / total) * 100,
+  }));
+
+  const svg = generateSvg(stats, total);
+
+  /**
+   * Update ONLY the SVG stored in the Gist.
+   */
+  const octokit = new Octokit({
+    auth: `token ${token}`,
+  });
+
   await octokit.gists.update({
-    gist_id: `${process.env.GIST_ID}`,
+    gist_id: gistId,
     files: {
-      [filename]: {
-        filename: morning + daytime > evening + night ? "I'm an early 🐤" : "I'm a night 🦉",
-        content: lines.join('\n'),
+      'productive-box.svg': {
+        content: svg,
       },
     },
   });
 
-  console.log('Success to update the gist 🎉');
+  console.log(`Updated productive-box.svg with ${total} commits.`);
 })();
