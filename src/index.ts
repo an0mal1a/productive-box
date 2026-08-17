@@ -2,9 +2,13 @@ import { Octokit } from '@octokit/rest';
 import { config } from 'dotenv';
 
 import githubQuery from './githubQuery.js';
-import { createCommittedDateQuery, createContributedRepoQuery, userInfoQuery } from './queries.js';
+import {
+  createCommittedDateQuery,
+  createContributedRepoQuery,
+  userInfoQuery,
+} from './queries.js';
 
-config({ path: ['.env'] });
+config();
 
 interface IRepo {
   name: string;
@@ -31,6 +35,8 @@ interface Stat {
   percent: number;
 }
 
+type TimeType = 'morning' | 'daytime' | 'evening' | 'night';
+
 function getEnv(name: string): string {
   const value = process.env[name];
 
@@ -41,25 +47,34 @@ function getEnv(name: string): string {
   return value;
 }
 
+/**
+ * Small inline SVG icons.
+ *
+ * No emoji/fonts involved, so rendering is consistent
+ * when GitHub serves the SVG.
+ */
 function getTimeIcon(
-  type: 'morning' | 'daytime' | 'evening' | 'night',
+  type: TimeType,
   x: number,
   y: number,
 ): string {
   const common = `
     fill="none"
     stroke="currentColor"
-    stroke-width="1.8"
+    stroke-width="1.6"
     stroke-linecap="round"
     stroke-linejoin="round"
   `;
 
   switch (type) {
+    /**
+     * Sunrise
+     */
     case 'morning':
       return `
         <g
           transform="translate(${x} ${y})"
-          class="time-icon morning-icon"
+          class="time-icon"
         >
           <path ${common} d="M2 15h16" />
           <path ${common} d="M5 15a5 5 0 0 1 10 0" />
@@ -71,11 +86,14 @@ function getTimeIcon(
         </g>
       `;
 
+    /**
+     * Sun
+     */
     case 'daytime':
       return `
         <g
           transform="translate(${x} ${y})"
-          class="time-icon daytime-icon"
+          class="time-icon"
         >
           <circle ${common} cx="10" cy="10" r="4" />
           <path ${common} d="M10 1v2" />
@@ -89,34 +107,46 @@ function getTimeIcon(
         </g>
       `;
 
+    /**
+     * Sunset
+     */
     case 'evening':
       return `
         <g
           transform="translate(${x} ${y})"
-          class="time-icon evening-icon"
+          class="time-icon"
         >
-          <path ${common} d="M2 15h16" />
-          <path ${common} d="M5 15a5 5 0 0 1 10 0" />
-          <path ${common} d="M3 18h14" />
-          <path ${common} d="M10 3v3" />
-          <path ${common} d="M4.5 7l2 2" />
-          <path ${common} d="M15.5 7l-2 2" />
+          <path ${common} d="M2 14h16" />
+          <path ${common} d="M5 14a5 5 0 0 1 10 0" />
+          <path ${common} d="M4 17h12" />
+          <path ${common} d="M10 2v3" />
+          <path ${common} d="M4.5 6l2 2" />
+          <path ${common} d="M15.5 6l-2 2" />
         </g>
       `;
 
+    /**
+     * Crescent moon + stars
+     */
     case 'night':
       return `
         <g
           transform="translate(${x} ${y})"
-          class="time-icon night-icon"
+          class="time-icon"
         >
           <path
             ${common}
-            d="M15.5 13.5A7 7 0 0 1 6.5 4.5
-               7 7 0 1 0 15.5 13.5Z"
+            d="
+              M14.5 13.5
+              A7 7 0 0 1 6.5 4
+              A7 7 0 1 0 14.5 13.5
+              Z
+            "
           />
-          <path ${common} d="M15 3v2" />
-          <path ${common} d="M14 4h2" />
+
+          <path ${common} d="M15 2.5v2" />
+          <path ${common} d="M14 3.5h2" />
+
           <path ${common} d="M18 7v1.5" />
           <path ${common} d="M17.25 7.75h1.5" />
         </g>
@@ -124,21 +154,40 @@ function getTimeIcon(
   }
 }
 
-function generateSvg(stats: Stat[], total: number): string {
+function generateSvg(
+  stats: Stat[],
+  total: number,
+): string {
+  /**
+   * Height deliberately matches the compact card
+   * used next to the other profile statistics.
+   */
   const width = 400;
-  const height = 190;
+  const height = 158.7;
+
+  /**
+   * Horizontal layout:
+   *
+   * icon | label | progress bar | %
+   */
+  const iconX = 20;
+  const labelX = 46;
 
   const barX = 135;
   const barWidth = 155;
-  const rowStart = 67;
-  const rowHeight = 28;
 
-  const iconTypes = [
+  /**
+   * Compact vertical distribution.
+   */
+  const rowStart = 56;
+  const rowHeight = 23;
+
+  const iconTypes: TimeType[] = [
     'morning',
     'daytime',
     'evening',
     'night',
-  ] as const;
+  ];
 
   const rows = stats
     .map((stat, index) => {
@@ -146,21 +195,24 @@ function generateSvg(stats: Stat[], total: number): string {
 
       const filledWidth = Math.max(
         0,
-        Math.min(barWidth, (stat.percent / 100) * barWidth),
+        Math.min(
+          barWidth,
+          (stat.percent / 100) * barWidth,
+        ),
       );
 
       const icon = getTimeIcon(
         iconTypes[index],
-        20,
-        y - 5,
+        iconX,
+        y - 6,
       );
 
       return `
         ${icon}
 
         <text
-          x="46"
-          y="${y + 10}"
+          x="${labelX}"
+          y="${y + 8}"
           class="label"
         >${stat.label}</text>
 
@@ -168,8 +220,8 @@ function generateSvg(stats: Stat[], total: number): string {
           x="${barX}"
           y="${y}"
           width="${barWidth}"
-          height="10"
-          rx="5"
+          height="8"
+          rx="4"
           class="bar-bg"
         />
 
@@ -177,14 +229,14 @@ function generateSvg(stats: Stat[], total: number): string {
           x="${barX}"
           y="${y}"
           width="${filledWidth.toFixed(2)}"
-          height="10"
-          rx="5"
+          height="8"
+          rx="4"
           class="bar"
         />
 
         <text
           x="380"
-          y="${y + 10}"
+          y="${y + 8}"
           text-anchor="end"
           class="percentage"
         >${stat.percent.toFixed(1)}%</text>
@@ -201,10 +253,12 @@ function generateSvg(stats: Stat[], total: number): string {
   role="img"
   aria-labelledby="title desc"
 >
-  <title id="title">Coding Activity</title>
+  <title id="title">
+    Coding Activity
+  </title>
 
   <desc id="desc">
-    Distribution of ${total} commits by time of day
+    Distribution of ${total} recent commits by time of day
   </desc>
 
   <style>
@@ -220,23 +274,23 @@ function generateSvg(stats: Stat[], total: number): string {
 
     .title {
       fill: #58a6ff;
-      font-size: 17px;
+      font-size: 16px;
       font-weight: 600;
     }
 
     .subtitle {
       fill: #8b949e;
-      font-size: 11px;
+      font-size: 10px;
     }
 
     .label {
       fill: #c9d1d9;
-      font-size: 12px;
+      font-size: 11px;
     }
 
     .percentage {
       fill: #8b949e;
-      font-size: 11px;
+      font-size: 10px;
     }
 
     .bar-bg {
@@ -252,6 +306,7 @@ function generateSvg(stats: Stat[], total: number): string {
     }
   </style>
 
+  <!-- Card -->
   <rect
     x="0.5"
     y="0.5"
@@ -262,18 +317,20 @@ function generateSvg(stats: Stat[], total: number): string {
     stroke="#1F242A"
   />
 
+  <!-- Header -->
   <text
     x="20"
-    y="27"
+    y="24"
     class="title"
   >Coding Activity</text>
 
   <text
     x="20"
-    y="46"
+    y="41"
     class="subtitle"
   >${total} recent commits</text>
 
+  <!-- Statistics -->
   ${rows}
 </svg>
 `.trim();
@@ -286,130 +343,250 @@ function generateSvg(stats: Stat[], total: number): string {
     const timezone = getEnv('TIMEZONE');
 
     /**
-     * 1. Get authenticated GitHub user.
-     *
-     * The owner/login comes directly from GH_TOKEN.
+     * --------------------------------------------------------
+     * 1. Authenticated user
+     * --------------------------------------------------------
      */
-    const userResponse = await githubQuery(userInfoQuery);
+    const userResponse = await githubQuery(
+      userInfoQuery,
+    );
 
-    if (userResponse?.message === 'Bad credentials') {
-      throw new Error('Invalid GitHub token. Please renew GH_TOKEN.');
+    if (
+      userResponse?.message === 'Bad credentials'
+    ) {
+      throw new Error(
+        'Invalid GitHub token. Please renew GH_TOKEN.',
+      );
     }
 
-    const { login: username, id } = userResponse?.data?.viewer ?? {};
+    if (userResponse?.errors?.length) {
+      throw new Error(
+        `GitHub GraphQL error: ${
+          userResponse.errors
+            .map(
+              (error: { message?: string }) =>
+                error.message ?? 'Unknown error',
+            )
+            .join(' | ')
+        }`,
+      );
+    }
+
+    const {
+      login: username,
+      id,
+    } = userResponse?.data?.viewer ?? {};
 
     if (!username || !id) {
-      throw new Error('Unable to get GitHub username/id from authenticated token.');
+      throw new Error(
+        `Unable to get GitHub username/id from authenticated token. Response: ${
+          JSON.stringify(userResponse)
+        }`,
+      );
     }
 
-    console.log(`Authenticated as ${username}`);
-
-    /**
-     * 2. Get all repositories contributed to by this user.
-     *
-     * This is the original productive-box behaviour.
-     * Private repositories are included if GH_TOKEN can access them.
-     */
-    const contributedRepoQuery = createContributedRepoQuery(username);
-
-    const repoResponse = await githubQuery(contributedRepoQuery);
-
-    if (repoResponse?.message === 'Bad credentials') {
-      throw new Error('Invalid GitHub token. Please renew GH_TOKEN.');
-    }
-
-    if (repoResponse?.errors?.length) {
-      throw new Error(`Unable to get repositories: ${JSON.stringify(repoResponse.errors)}`);
-    }
-
-    const repoNodes = repoResponse?.data?.user?.repositoriesContributedTo?.nodes ?? [];
-
-    const repos: IRepo[] = repoNodes
-      .filter((repoInfo: RepoInfo | null) => {
-        return repoInfo !== null && !repoInfo.isFork;
-      })
-      .map((repoInfo: RepoInfo) => ({
-        name: repoInfo.name,
-        owner: repoInfo.owner.login,
-      }));
-
-    console.log(`Found ${repos.length} repositories`);
-
-    if (!repos.length) {
-      throw new Error('No repositories found.');
-    }
-
-    /**
-     * 3. Get commit timestamps from every repository.
-     *
-     * A failure in one repo does not kill the entire action.
-     */
-    const committedTimeResponseMap = await Promise.all(
-      repos.map(async ({ name, owner }) => {
-        try {
-          const response = await githubQuery(createCommittedDateQuery(id, name, owner));
-
-          if (response?.errors?.length) {
-            console.warn(
-              `Skipping ${owner}/${name}: ${response.errors
-                .map((error: { message?: string }) => error.message)
-                .join(', ')}`,
-            );
-
-            return null;
-          }
-
-          return response;
-        } catch (error) {
-          console.warn(`Skipping ${owner}/${name}: ${String(error)}`);
-
-          return null;
-        }
-      }),
+    console.log(
+      `Authenticated as ${username}`,
     );
 
     /**
-     * 4. Count commits by local time.
+     * --------------------------------------------------------
+     * 2. Discover repositories
+     * --------------------------------------------------------
      *
-     * Morning:  06:00 - 11:59
-     * Daytime:  12:00 - 17:59
-     * Evening:  18:00 - 23:59
-     * Night:    00:00 - 05:59
+     * Includes private repositories when GH_TOKEN can access
+     * them.
+     */
+    const contributedRepoQuery =
+      createContributedRepoQuery(username);
+
+    const repoResponse = await githubQuery(
+      contributedRepoQuery,
+    );
+
+    if (
+      repoResponse?.message === 'Bad credentials'
+    ) {
+      throw new Error(
+        'Invalid GitHub token. Please renew GH_TOKEN.',
+      );
+    }
+
+    if (repoResponse?.errors?.length) {
+      throw new Error(
+        `Unable to get repositories: ${
+          repoResponse.errors
+            .map(
+              (error: { message?: string }) =>
+                error.message ?? 'Unknown error',
+            )
+            .join(' | ')
+        }`,
+      );
+    }
+
+    const repoNodes =
+      repoResponse
+        ?.data
+        ?.user
+        ?.repositoriesContributedTo
+        ?.nodes ?? [];
+
+    const repos: IRepo[] = repoNodes
+      .filter(
+        (
+          repoInfo: RepoInfo | null,
+        ): repoInfo is RepoInfo =>
+          repoInfo !== null &&
+          !repoInfo.isFork,
+      )
+      .map(
+        (repoInfo: RepoInfo) => ({
+          name: repoInfo.name,
+          owner: repoInfo.owner.login,
+        }),
+      );
+
+    console.log(
+      `Found ${repos.length} repositories`,
+    );
+
+    if (!repos.length) {
+      throw new Error(
+        'No repositories found.',
+      );
+    }
+
+    /**
+     * --------------------------------------------------------
+     * 3. Query commits
+     * --------------------------------------------------------
+     */
+    const committedTimeResponseMap =
+      await Promise.all(
+        repos.map(
+          async ({
+            name,
+            owner,
+          }) => {
+            try {
+              const response =
+                await githubQuery(
+                  createCommittedDateQuery(
+                    id,
+                    name,
+                    owner,
+                  ),
+                );
+
+              if (
+                response?.errors?.length
+              ) {
+                console.warn(
+                  `Skipping ${owner}/${name}: ${
+                    response.errors
+                      .map(
+                        (
+                          error: {
+                            message?: string;
+                          },
+                        ) =>
+                          error.message ??
+                          'Unknown error',
+                      )
+                      .join(', ')
+                  }`,
+                );
+
+                return null;
+              }
+
+              return response;
+            } catch (error) {
+              console.warn(
+                `Skipping ${owner}/${name}: ${String(
+                  error,
+                )}`,
+              );
+
+              return null;
+            }
+          },
+        ),
+      );
+
+    /**
+     * --------------------------------------------------------
+     * 4. Group commits by time
+     * --------------------------------------------------------
+     *
+     * Morning   06:00 - 11:59
+     * Daytime   12:00 - 17:59
+     * Evening   18:00 - 23:59
+     * Night     00:00 - 05:59
      */
     let morning = 0;
     let daytime = 0;
     let evening = 0;
     let night = 0;
 
-    for (const committedTimeResponse of committedTimeResponseMap) {
+    for (
+      const committedTimeResponse
+      of committedTimeResponseMap
+    ) {
       if (!committedTimeResponse) {
         continue;
       }
 
-      const edges: Edge[] = committedTimeResponse?.data?.repository?.defaultBranchRef?.target?.history?.edges ?? [];
+      const edges: Edge[] =
+        committedTimeResponse
+          ?.data
+          ?.repository
+          ?.defaultBranchRef
+          ?.target
+          ?.history
+          ?.edges ?? [];
 
       for (const edge of edges) {
-        const committedDate = edge?.node?.committedDate;
+        const committedDate =
+          edge?.node?.committedDate;
 
         if (!committedDate) {
           continue;
         }
 
-        const timeString = new Date(committedDate).toLocaleTimeString('en-US', {
-          hour12: false,
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-          timeZone: timezone,
-        });
+        const timeString =
+          new Date(
+            committedDate,
+          ).toLocaleTimeString(
+            'en-US',
+            {
+              hour12: false,
+              hour: '2-digit',
+              minute: '2-digit',
+              second: '2-digit',
+              timeZone: timezone,
+            },
+          );
 
-        const hour = Number(timeString.split(':')[0]);
+        const hour = Number(
+          timeString.split(':')[0],
+        );
 
-        if (hour >= 6 && hour < 12) {
+        if (
+          hour >= 6 &&
+          hour < 12
+        ) {
           morning++;
-        } else if (hour >= 12 && hour < 18) {
+        } else if (
+          hour >= 12 &&
+          hour < 18
+        ) {
           daytime++;
-        } else if (hour >= 18 && hour < 24) {
+        } else if (
+          hour >= 18 &&
+          hour < 24
+        ) {
           evening++;
         } else {
           night++;
@@ -417,98 +594,142 @@ function generateSvg(stats: Stat[], total: number): string {
       }
     }
 
-    const total = morning + daytime + evening + night;
+    const total =
+      morning +
+      daytime +
+      evening +
+      night;
 
     if (!total) {
-      throw new Error('No commits found.');
+      throw new Error(
+        'No commits found.',
+      );
     }
 
-    console.log(`Found ${total} commits`);
-
     /**
-     * 5. Calculate percentages.
+     * --------------------------------------------------------
+     * 5. Statistics
+     * --------------------------------------------------------
      */
     const stats: Stat[] = [
       {
         label: 'Morning',
         commits: morning,
-        percent: (morning / total) * 100,
+        percent:
+          (morning / total) * 100,
       },
       {
         label: 'Daytime',
         commits: daytime,
-        percent: (daytime / total) * 100,
+        percent:
+          (daytime / total) * 100,
       },
       {
         label: 'Evening',
         commits: evening,
-        percent: (evening / total) * 100,
+        percent:
+          (evening / total) * 100,
       },
       {
         label: 'Night',
         commits: night,
-        percent: (night / total) * 100,
+        percent:
+          (night / total) * 100,
       },
     ];
 
     /**
-     * 6. Generate SVG.
+     * --------------------------------------------------------
+     * 6. Generate SVG
+     * --------------------------------------------------------
      */
-    const svg = generateSvg(stats, total);
+    const svg = generateSvg(
+      stats,
+      total,
+    );
 
     /**
-     * 7. Update Gist.
-     *
-     * We first obtain its current filename and rename that file
-     * to productive-box.svg, so we don't leave the original
-     * placeholder file behind.
+     * --------------------------------------------------------
+     * 7. Update Gist
+     * --------------------------------------------------------
      */
     const octokit = new Octokit({
       auth: `token ${token}`,
     });
 
-    const gist = await octokit.gists.get({
-      gist_id: gistId,
-    });
+    const gist =
+      await octokit.gists.get({
+        gist_id: gistId,
+      });
 
     if (!gist.data.files) {
-      throw new Error('No file found in Gist.');
+      throw new Error(
+        'No files found in Gist.',
+      );
     }
 
-    const filenames = Object.keys(gist.data.files);
+    const filenames = Object.keys(
+      gist.data.files,
+    );
 
     if (!filenames.length) {
-      throw new Error('Gist contains no files.');
+      throw new Error(
+        'Gist contains no files.',
+      );
     }
 
     /**
-     * Prefer an existing productive-box.svg.
-     * Otherwise rename the first file in the Gist.
+     * If productive-box.svg already exists, update it.
+     *
+     * Otherwise rename the first Gist file to
+     * productive-box.svg.
      */
-    const currentFilename = filenames.includes('productive-box.svg') ? 'productive-box.svg' : filenames[0];
+    const currentFilename =
+      filenames.includes(
+        'productive-box.svg',
+      )
+        ? 'productive-box.svg'
+        : filenames[0];
 
     await octokit.gists.update({
       gist_id: gistId,
 
       files: {
         [currentFilename]: {
-          filename: 'productive-box.svg',
+          filename:
+            'productive-box.svg',
           content: svg,
         },
       },
     });
 
-    console.log('Successfully updated productive-box.svg 🎉');
-
+    console.log('');
+    console.log(
+      'Successfully updated productive-box.svg 🎉',
+    );
     console.log('');
     console.log('Stats:');
-    console.log(`Morning: ${morning}`);
-    console.log(`Daytime: ${daytime}`);
-    console.log(`Evening: ${evening}`);
-    console.log(`Night: ${night}`);
-    console.log(`Total: ${total}`);
+    console.log(
+      `Morning: ${morning}`,
+    );
+    console.log(
+      `Daytime: ${daytime}`,
+    );
+    console.log(
+      `Evening: ${evening}`,
+    );
+    console.log(
+      `Night: ${night}`,
+    );
+    console.log(
+      `Total: ${total}`,
+    );
   } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
+    console.error(
+      error instanceof Error
+        ? error.message
+        : String(error),
+    );
 
     process.exitCode = 1;
   }
