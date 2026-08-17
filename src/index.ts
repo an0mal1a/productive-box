@@ -41,25 +41,126 @@ function getEnv(name: string): string {
   return value;
 }
 
+function getTimeIcon(
+  type: 'morning' | 'daytime' | 'evening' | 'night',
+  x: number,
+  y: number,
+): string {
+  const common = `
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.8"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  `;
+
+  switch (type) {
+    case 'morning':
+      return `
+        <g
+          transform="translate(${x} ${y})"
+          class="time-icon morning-icon"
+        >
+          <path ${common} d="M2 15h16" />
+          <path ${common} d="M5 15a5 5 0 0 1 10 0" />
+          <path ${common} d="M10 2v3" />
+          <path ${common} d="M4.5 6l2 2" />
+          <path ${common} d="M15.5 6l-2 2" />
+          <path ${common} d="M2 10h3" />
+          <path ${common} d="M15 10h3" />
+        </g>
+      `;
+
+    case 'daytime':
+      return `
+        <g
+          transform="translate(${x} ${y})"
+          class="time-icon daytime-icon"
+        >
+          <circle ${common} cx="10" cy="10" r="4" />
+          <path ${common} d="M10 1v2" />
+          <path ${common} d="M10 17v2" />
+          <path ${common} d="M1 10h2" />
+          <path ${common} d="M17 10h2" />
+          <path ${common} d="M3.6 3.6l1.4 1.4" />
+          <path ${common} d="M15 15l1.4 1.4" />
+          <path ${common} d="M16.4 3.6L15 5" />
+          <path ${common} d="M5 15l-1.4 1.4" />
+        </g>
+      `;
+
+    case 'evening':
+      return `
+        <g
+          transform="translate(${x} ${y})"
+          class="time-icon evening-icon"
+        >
+          <path ${common} d="M2 15h16" />
+          <path ${common} d="M5 15a5 5 0 0 1 10 0" />
+          <path ${common} d="M3 18h14" />
+          <path ${common} d="M10 3v3" />
+          <path ${common} d="M4.5 7l2 2" />
+          <path ${common} d="M15.5 7l-2 2" />
+        </g>
+      `;
+
+    case 'night':
+      return `
+        <g
+          transform="translate(${x} ${y})"
+          class="time-icon night-icon"
+        >
+          <path
+            ${common}
+            d="M15.5 13.5A7 7 0 0 1 6.5 4.5
+               7 7 0 1 0 15.5 13.5Z"
+          />
+          <path ${common} d="M15 3v2" />
+          <path ${common} d="M14 4h2" />
+          <path ${common} d="M18 7v1.5" />
+          <path ${common} d="M17.25 7.75h1.5" />
+        </g>
+      `;
+  }
+}
+
 function generateSvg(stats: Stat[], total: number): string {
   const width = 400;
   const height = 190;
 
-  const barX = 115;
-  const barWidth = 180;
+  const barX = 135;
+  const barWidth = 155;
   const rowStart = 67;
   const rowHeight = 28;
+
+  const iconTypes = [
+    'morning',
+    'daytime',
+    'evening',
+    'night',
+  ] as const;
 
   const rows = stats
     .map((stat, index) => {
       const y = rowStart + index * rowHeight;
 
-      const filledWidth = Math.max(0, Math.min(barWidth, (stat.percent / 100) * barWidth));
+      const filledWidth = Math.max(
+        0,
+        Math.min(barWidth, (stat.percent / 100) * barWidth),
+      );
+
+      const icon = getTimeIcon(
+        iconTypes[index],
+        20,
+        y - 5,
+      );
 
       return `
+        ${icon}
+
         <text
-          x="20"
-          y="${y + 11}"
+          x="46"
+          y="${y + 10}"
           class="label"
         >${stat.label}</text>
 
@@ -145,6 +246,10 @@ function generateSvg(stats: Stat[], total: number): string {
     .bar {
       fill: #2f81f7;
     }
+
+    .time-icon {
+      color: #58a6ff;
+    }
   </style>
 
   <rect
@@ -154,7 +259,7 @@ function generateSvg(stats: Stat[], total: number): string {
     height="${height - 1}"
     rx="6"
     fill="#0d1117"
-    stroke="#30363d"
+    stroke="#1F242A"
   />
 
   <text
