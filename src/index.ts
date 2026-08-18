@@ -179,7 +179,7 @@ function generateSvg(
   /**
    * Compact vertical distribution.
    */
-  const rowStart = 56;
+  const rowStart = 58;
   const rowHeight = 23;
 
   const iconTypes: TimeType[] = [
@@ -274,7 +274,7 @@ function generateSvg(
 
     .title {
       fill: #58a6ff;
-      font-size: 16px;
+      font-size: 17px;
       font-weight: 600;
     }
 
@@ -302,7 +302,7 @@ function generateSvg(
     }
 
     .time-icon {
-      color: #58a6ff;
+      color: #4493f8;
     }
   </style>
 
